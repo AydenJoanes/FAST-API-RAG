@@ -1,40 +1,47 @@
+"""
+Retrieve Route - Thin Controller using Service Layer
+
+Design Pattern: Facade (via RetrievalService)
+- Route is now a thin controller that delegates to RetrievalService
+- All business logic is encapsulated in the service layer
+
+SOLID Principles:
+- SRP: Route only handles HTTP concerns
+- DIP: Depends on RetrievalService abstraction
+"""
 from fastapi import APIRouter
 from typing import Optional
 
-from app.services.embeddings import EmbeddingService
-from app.db.vector_store import VectorStore
+from app.application import RetrievalService
+from app.core.logging import logger
 
 router = APIRouter()
 
-embedder = EmbeddingService()
-vector_store = VectorStore()
+# Service instance (Facade Pattern)
+retrieval_service = RetrievalService()
 
 
 @router.post("/")
 def retrieve(
     query: str,
-    tag: Optional[str] = None
+    tag: Optional[str] = None,
+    top_k: int = 5
 ):
-    # 1. Wildcard logic
-    if query.strip() == "*":
-        results = vector_store.search(
-            query_embedding=None,
-            tag=tag
-        )
-        return {
-            "query": query,
-            "results": results
-        }
-
-    # 2. Normal semantic search
-    query_embedding = embedder.embed_text(query)
-
-    results = vector_store.search(
-        query_embedding=query_embedding,
-        tag=tag
+    """
+    Retrieve relevant documents for a query.
+    
+    The route is now a thin controller:
+    - Receives request parameters
+    - Delegates to RetrievalService (Facade)
+    - Returns response
+    """
+    logger.info(f"Retrieve request: {query[:50]}..., tag: {tag}")
+    
+    # Delegate to service (Facade Pattern)
+    result = retrieval_service.retrieve(
+        query=query,
+        tag=tag,
+        top_k=top_k
     )
-
-    return {
-        "query": query,
-        "results": results
-    }
+    
+    return result

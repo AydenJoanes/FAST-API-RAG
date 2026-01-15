@@ -1,51 +1,47 @@
-from fastapi import APIRouter
+"""
+Chat Route - Thin Controller using Service Layer
 
-from app.services.tag_inference import infer_tag_from_text
-from app.services.embeddings import EmbeddingService
-from app.services.llm import call_llm
-from app.db.vector_store import VectorStore
+Design Pattern: Facade (via ChatService)
+- Route is now a thin controller that delegates to ChatService
+- All RAG orchestration logic is in the service layer
+
+SOLID Principles:
+- SRP: Route only handles HTTP concerns
+- DIP: Depends on ChatService abstraction
+"""
+from fastapi import APIRouter
+from typing import Optional
+
+from app.application import ChatService
 from app.core.logging import logger
 
 router = APIRouter()
 
-vector_store = VectorStore()
-embedder = EmbeddingService()
+# Service instance (Facade Pattern)
+chat_service = ChatService()
 
 
 @router.post("/")
-def chat(message: str):
+def chat(
+    message: str,
+    tag: Optional[str] = None,
+    top_k: int = 5
+):
+    """
+    Process a chat message with RAG.
+    
+    The route is now a thin controller:
+    - Receives request parameters
+    - Delegates to ChatService (Facade)
+    - Returns response
+    """
     logger.info(f"Chat request: {message[:50]}...")
     
-    # 1. Infer tag from user message
-    inferred_tag = infer_tag_from_text(message)
-    logger.debug(f"Inferred tag: {inferred_tag}")
-
-    # 2. Check for wildcard in message
-    if "*" in message:
-        query_embedding = None
-    else:
-        query_embedding = embedder.embed_text(message)
-
-    # 3. Retrieve relevant chunks from DB
-    results = vector_store.search(
-        query_embedding=query_embedding,
-        tag=inferred_tag,
-        top_k=5
+    # Delegate to service (Facade Pattern)
+    result = chat_service.chat(
+        message=message,
+        tag=tag,
+        top_k=top_k
     )
-    logger.info(f"Retrieved {len(results)} chunks from database")
-
-    # 4. Build context for LLM
-    if not results:
-        context = "No relevant context found."
-    else:
-        context = "\n\n".join([r["content"] for r in results])
-
-    # 5. Call LLM
-    answer = call_llm(context=context, question=message)
-    logger.success(f"Generated response for: {message[:30]}...")
-
-    return {
-        "message": message,
-        "inferred_tag": inferred_tag,
-        "answer": answer
-    }
+    
+    return result

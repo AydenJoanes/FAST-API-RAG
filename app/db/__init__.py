@@ -1,3 +1,3 @@
-"""DB package for rag_fastapi. Database connection will be added later."""
+"""DB package for rag_fastapi. Database models and connection."""
 
-__all__ = ["models", "vector_store"]
+__all__ = ["models"]
