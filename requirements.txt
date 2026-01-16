@@ -11,3 +11,8 @@ torch
 
 psycopg2-binary
 pgvector
+
+# Testing
+pytest
+pytest-cov
+httpx

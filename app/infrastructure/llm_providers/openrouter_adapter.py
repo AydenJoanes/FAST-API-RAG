@@ -11,6 +11,12 @@ SOLID Principles:
 - LSP: Can replace any ILLMProvider implementation
 - ISP: Implements focused interface methods
 - DIP: Depends on ILLMProvider abstraction
+
+Exception Handling:
+- Timeout → LLMConnectionError
+- Rate limit (429) → LLMRateLimitError  
+- Auth error (401/403) → LLMAuthenticationError
+- Empty response → LLMResponseError
 """
 import os
 import threading
@@ -20,6 +26,12 @@ from dotenv import load_dotenv
 
 from app.domain.interfaces import ILLMProvider
 from app.core.logging import logger
+from app.core.exceptions import (
+    LLMConnectionError,
+    LLMRateLimitError,
+    LLMAuthenticationError,
+    LLMResponseError,
+)
 
 load_dotenv()
 
@@ -133,7 +145,18 @@ class OpenRouterAdapter(ILLMProvider):
             
         Returns:
             Generated response
+            
+        Raises:
+            LLMAuthenticationError: If API key is invalid
+            LLMRateLimitError: If rate limit exceeded
+            LLMConnectionError: If API is unreachable or timeout
+            LLMResponseError: If response is empty or malformed
         """
+        # Edge case: No API key
+        if not self._api_key:
+            logger.error("OpenRouter API key not configured")
+            raise LLMAuthenticationError()
+        
         logger.debug(f"Calling OpenRouter with {len(messages)} messages...")
         
         headers = {
@@ -157,21 +180,53 @@ class OpenRouterAdapter(ILLMProvider):
                 json=payload,
                 timeout=60
             )
+            
+            # Handle specific HTTP errors
+            if response.status_code == 401 or response.status_code == 403:
+                logger.error(f"OpenRouter authentication failed: {response.status_code}")
+                raise LLMAuthenticationError()
+            
+            if response.status_code == 429:
+                logger.warning("OpenRouter rate limit exceeded")
+                raise LLMRateLimitError()
+            
             response.raise_for_status()
             
-            answer = response.json()["choices"][0]["message"]["content"]
+            # Parse response
+            data = response.json()
+            
+            # Edge case: Empty or malformed response
+            if not data.get("choices"):
+                logger.error(f"OpenRouter returned empty choices: {data}")
+                raise LLMResponseError("No choices in response")
+            
+            answer = data["choices"][0].get("message", {}).get("content", "")
+            
+            if not answer or not answer.strip():
+                logger.error("OpenRouter returned empty content")
+                raise LLMResponseError("Empty content in response")
+            
             logger.info(f"OpenRouter response received ({len(answer)} chars)")
             return answer
             
+        except (LLMAuthenticationError, LLMRateLimitError, LLMResponseError):
+            # Re-raise our custom exceptions
+            raise
         except requests.exceptions.Timeout:
             logger.error("OpenRouter request timed out")
-            raise RuntimeError("LLM request timed out")
+            raise LLMConnectionError("Request timed out after 60 seconds")
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"OpenRouter connection failed: {e}")
+            raise LLMConnectionError(str(e))
         except requests.exceptions.HTTPError as e:
             logger.error(f"OpenRouter HTTP error: {e}")
-            raise RuntimeError(f"LLM API error: {e}")
+            raise LLMConnectionError(str(e))
+        except KeyError as e:
+            logger.error(f"Malformed OpenRouter response: {e}")
+            raise LLMResponseError(f"Missing key in response: {e}")
         except Exception as e:
-            logger.error(f"OpenRouter call failed: {e}")
-            raise RuntimeError(f"LLM call failed: {e}")
+            logger.error(f"Unexpected OpenRouter error: {e}")
+            raise LLMConnectionError(str(e))
     
     def generate_with_context(
         self,

@@ -9,12 +9,18 @@ Design Pattern: Repository
 SOLID Principle: 
     - Single Responsibility (only handles data persistence)
     - Dependency Inversion (implements IVectorStore interface)
+
+Exception Handling:
+    - Connection failure → DatabaseConnectionError
+    - Query failure → DatabaseQueryError
 """
 from typing import List, Dict, Optional
+import psycopg2
 
 from app.domain.interfaces.vector_store import IVectorStore
 from app.db.models import get_connection
 from app.core.logging import logger
+from app.core.exceptions import DatabaseConnectionError, DatabaseQueryError
 
 
 class PostgresVectorStore(IVectorStore):
@@ -23,7 +29,25 @@ class PostgresVectorStore(IVectorStore):
     
     Implements IVectorStore interface, allowing future swap to
     other vector databases (Pinecone, Chroma, Weaviate, etc.)
+    
+    Handles edge cases: connection failures, query errors, timeouts.
     """
+    
+    def _get_connection(self):
+        """
+        Get database connection with error handling.
+        
+        Raises:
+            DatabaseConnectionError: If connection fails
+        """
+        try:
+            return get_connection()
+        except psycopg2.OperationalError as e:
+            logger.error(f"Database connection failed: {e}")
+            raise DatabaseConnectionError(str(e))
+        except Exception as e:
+            logger.error(f"Unexpected database connection error: {e}")
+            raise DatabaseConnectionError(str(e))
     
     def add(self, records: List[Dict]) -> None:
         """
@@ -31,8 +55,17 @@ class PostgresVectorStore(IVectorStore):
         
         Args:
             records: List of dicts with text, embedding, and metadata
+            
+        Raises:
+            DatabaseConnectionError: If connection fails
+            DatabaseQueryError: If insert fails
         """
-        conn = get_connection()
+        # Edge case: Empty records
+        if not records:
+            logger.warning("No records to add")
+            return
+        
+        conn = self._get_connection()
         cur = conn.cursor()
         
         try:
@@ -55,10 +88,14 @@ class PostgresVectorStore(IVectorStore):
             conn.commit()
             logger.debug(f"Stored {len(records)} chunks in database")
             
-        except Exception as e:
+        except psycopg2.Error as e:
             conn.rollback()
             logger.error(f"Failed to store records: {e}")
-            raise
+            raise DatabaseQueryError("store documents", str(e))
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Unexpected error storing records: {e}")
+            raise DatabaseQueryError("store documents", str(e))
         finally:
             cur.close()
             conn.close()
@@ -79,8 +116,12 @@ class PostgresVectorStore(IVectorStore):
             
         Returns:
             List of matching documents with content and metadata
+            
+        Raises:
+            DatabaseConnectionError: If connection fails
+            DatabaseQueryError: If search fails
         """
-        conn = get_connection()
+        conn = self._get_connection()
         cur = conn.cursor()
         
         try:
@@ -140,7 +181,13 @@ class PostgresVectorStore(IVectorStore):
                 }
                 for r in rows
             ]
-            
+        
+        except psycopg2.Error as e:
+            logger.error(f"Database search failed: {e}")
+            raise DatabaseQueryError("search documents", str(e))
+        except Exception as e:
+            logger.error(f"Unexpected error during search: {e}")
+            raise DatabaseQueryError("search documents", str(e))
         finally:
             cur.close()
             conn.close()
@@ -154,8 +201,12 @@ class PostgresVectorStore(IVectorStore):
             
         Returns:
             Number of deleted records
+            
+        Raises:
+            DatabaseConnectionError: If connection fails
+            DatabaseQueryError: If delete fails
         """
-        conn = get_connection()
+        conn = self._get_connection()
         cur = conn.cursor()
         
         try:
@@ -173,10 +224,14 @@ class PostgresVectorStore(IVectorStore):
             
             return deleted_count
             
-        except Exception as e:
+        except psycopg2.Error as e:
             conn.rollback()
             logger.error(f"Failed to delete records: {e}")
-            raise
+            raise DatabaseQueryError("delete documents", str(e))
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Unexpected error deleting records: {e}")
+            raise DatabaseQueryError("delete documents", str(e))
         finally:
             cur.close()
             conn.close()

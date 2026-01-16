@@ -692,7 +692,8 @@
                         uploadStatus.className = 'upload-status';
                     }, 3000);
                 } else {
-                    throw new Error(data.detail || 'Upload failed');
+                    // Check both 'message' (our custom errors) and 'detail' (FastAPI default)
+                    throw new Error(data.message || data.detail || 'Upload failed');
                 }
             } catch (error) {
                 uploadStatus.className = 'upload-status error';

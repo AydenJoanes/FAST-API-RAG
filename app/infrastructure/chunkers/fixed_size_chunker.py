@@ -10,12 +10,16 @@ SOLID Principles:
     - Open/Closed (add new strategies without modifying existing code)
     - Liskov Substitution (interchangeable with other IChunker implementations)
     - Dependency Inversion (implements IChunker interface)
+
+Exception Handling:
+    - Empty/whitespace text → EmptyTextError
 """
 import re
 from typing import List, Dict, Optional
 
 from app.domain.interfaces.chunker import IChunker
 from app.core.logging import logger
+from app.core.exceptions import EmptyTextError
 
 
 class FixedSizeChunker(IChunker):
@@ -52,11 +56,24 @@ class FixedSizeChunker(IChunker):
             
         Returns:
             List of chunk dicts with text, chunk_id, and metadata
+            
+        Raises:
+            EmptyTextError: If text is empty or whitespace-only
         """
         metadata = metadata or {}
         
+        # Edge case: None or empty text
+        if text is None:
+            logger.warning("Received None text for chunking")
+            raise EmptyTextError()
+        
         # Clean and normalize text
         cleaned_text = self._clean_text(text)
+        
+        # Edge case: Empty or whitespace-only text after cleaning
+        if not cleaned_text:
+            logger.warning("Text is empty or whitespace-only after cleaning")
+            raise EmptyTextError()
         
         chunks = []
         start = 0

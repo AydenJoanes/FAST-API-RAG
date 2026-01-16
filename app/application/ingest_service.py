@@ -87,8 +87,8 @@ class IngestService:
         # 1. Get appropriate loader from factory
         loader = DocumentLoaderFactory.get_loader(filename)
         
-        # 2. Extract pages
-        pages = loader.load(file_bytes)
+        # 2. Extract pages (pass filename for better error messages)
+        pages = loader.load(file_bytes, filename=filename)
         logger.info(f"Extracted {len(pages)} pages from document")
         
         # 3. Process pages: chunk + embed
@@ -124,8 +124,8 @@ class IngestService:
         return {
             "filename": filename,
             "tag": tag,
-            "pages_processed": len(pages),
-            "chunks_created": total_chunks,
+            "pages": len(pages),
+            "chunks_stored": total_chunks,
             "status": "success"
         }
     
